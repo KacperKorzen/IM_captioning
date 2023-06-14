@@ -82,12 +82,17 @@ def extract_features_VGG16(directory: str):
 
         # get image id
         image_id = name.split('.')[0]
+
+        feature_path = directory[:-6]+ "features_vgg_va/" + str(image_id)+ '.npy'
         # store feature
-        features[image_id] = feature
+        features[image_id] = feature_path#feature
+        np.save(feature_path, feature.numpy())
         counter += 1
         print_progress(counter, len(listdir(directory)))
-    print('Transforming images succeed')
-    return features
+    print('\nTransforming images succeed')
+    features_shape = feature.shape[2]
+    attention_features_shape = feature.shape[1]
+    return features, features_shape, attention_features_shape
 
 def extract_features_xcepction(directory: str):
     """extract_features_xception is used to load end extract features of photos from dataset
@@ -135,12 +140,16 @@ def extract_features_xcepction(directory: str):
 
         # get image id
         image_id = name.split('.')[0]
+        feature_path = directory[:-6]+ "features_xception_va/" + str(image_id)+ '.npy'
         # store feature
-        features[image_id] = feature
+        features[image_id] = feature_path#feature
+        np.save(feature_path, feature.numpy())
         counter += 1
         print_progress(counter, len(listdir(directory)))
-    print('Transforming images succeed')
-    return features
+    print('\nTransforming images succeed')
+    features_shape = feature.shape[2]
+    attention_features_shape = feature.shape[1]
+    return features, features_shape, attention_features_shape
 
 
 class BahdanauAttention(tf.keras.Model):
@@ -193,6 +202,7 @@ class RNN_Decoder(tf.keras.Model):
         self.units = units
 
         self.embedding = tf.keras.layers.Embedding(vocab_size, embedding_dim)
+        # GRU lub LSTM TODO dodać wybor
         self.gru = tf.keras.layers.GRU(self.units,
                                        return_sequences=True,
                                        return_state=True,

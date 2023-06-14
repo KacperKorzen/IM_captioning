@@ -313,3 +313,35 @@ generate_caption('/Users/korzeniewski/Desktop/zdjecia/zdjecia_biznesowe',
 generate_caption(PATH_COCO_IMAGES+'/train2017', random.choice(train_keys), caption=0)
 
 # %%
+
+scorer_rouge = rouge_scorer.RougeScorer(['rouge1','rouge2', 'rougeL'], use_stemmer=True)
+
+candidate_row = 'little girl is doing back bend in filed'
+reference_row = 'little girl doing back bend'
+
+candidate = candidate_row.split()
+reference = reference_row.split()
+
+# Calculate BLEU-1 score
+bleu_1 = sentence_bleu([reference], candidate, weights=(1, 0, 0, 0))
+# Calculate BLEU-2 score
+bleu_2 = sentence_bleu([reference], candidate, weights=(0.5, 0.5, 0, 0))
+# Calculate BLEU-3 score
+bleu_3 = sentence_bleu([reference], candidate, weights=(1/3, 1/3, 1/3, 0))
+# Calculate BLEU-4 score
+bleu_4 = sentence_bleu([reference], candidate, weights=(0.25, 0.25, 0.25, 0.25))
+# calculate Meteor
+meteor = meteor_score([reference], candidate)
+# rouge score
+rouge_scores = scorer_rouge.score(reference_row, candidate_row)
+rouge_1 = rouge_scores['rouge1'].fmeasure
+rouge_2 = rouge_scores['rouge2'].fmeasure
+rouge_L = rouge_scores['rougeL'].fmeasure
+print("BLEU-1:", bleu_1)
+print("BLEU-2:", bleu_2)
+print("BLEU-3:", bleu_3)
+print("BLEU-4:", bleu_4)
+print("METEOR:", meteor)
+print("ROUGE-1:", rouge_1)
+print("ROUGE-2:", rouge_2)
+print("ROUGE-L:", rouge_L)

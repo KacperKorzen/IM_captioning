@@ -17,6 +17,26 @@ from tensorflow.keras.preprocessing.image import load_img
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.preprocessing.text import Tokenizer
 
+import nltk
+
+def compute_cider(references, generated_text):
+    # Tokenize the generated text and references
+    gen_tokens = nltk.word_tokenize(generated_text.lower())
+    ref_tokens = [nltk.word_tokenize(ref.lower()) for ref in references]
+
+    # Compute n-gram counts for the generated text and references
+    gen_ngrams = nltk.ngrams(gen_tokens, 2)  # Change the '2' to the desired n-gram order
+    ref_ngrams = [nltk.ngrams(ref, 2) for ref in ref_tokens]
+
+    # Calculate the n-gram overlap scores
+    ngram_overlap_scores = [
+        nltk.translate.bleu_score.sentence_bleu([ref], gen, weights=(1,))  # Change the '1' to the desired n-gram order
+        for ref in ref_ngrams
+    ]
+
+    # Compute the CIDER score as the average n-gram overlap score
+    cider_score = sum(ngram_overlap_scores) / len(ngram_overlap_scores)
+    return cider_score
 
 
 def print_progress(count, max_count):
