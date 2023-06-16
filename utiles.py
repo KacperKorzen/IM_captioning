@@ -19,26 +19,6 @@ from tensorflow.keras.preprocessing.text import Tokenizer
 
 import nltk
 
-def compute_cider(references, generated_text):
-    # Tokenize the generated text and references
-    gen_tokens = nltk.word_tokenize(generated_text.lower())
-    ref_tokens = [nltk.word_tokenize(ref.lower()) for ref in references]
-
-    # Compute n-gram counts for the generated text and references
-    gen_ngrams = nltk.ngrams(gen_tokens, 2)  # Change the '2' to the desired n-gram order
-    ref_ngrams = [nltk.ngrams(ref, 2) for ref in ref_tokens]
-
-    # Calculate the n-gram overlap scores
-    ngram_overlap_scores = [
-        nltk.translate.bleu_score.sentence_bleu([ref], gen, weights=(1,))  # Change the '1' to the desired n-gram order
-        for ref in ref_ngrams
-    ]
-
-    # Compute the CIDER score as the average n-gram overlap score
-    cider_score = sum(ngram_overlap_scores) / len(ngram_overlap_scores)
-    return cider_score
-
-
 def print_progress(count, max_count):
     """function to print progress of current operation
 
@@ -193,7 +173,6 @@ class TokenizerWrap(Tokenizer):
 
         return text
     
-
 def extract_features_VGG16(directory: str):
     """extract_features_VGG16 is used to load end extract features of photos from dataset
 
@@ -209,6 +188,7 @@ def extract_features_VGG16(directory: str):
     # pop last fully connect layer
     model = Model(inputs = model.input,
                 outputs = model.layers[-2].output)
+
     print(model.summary())
     print('\n')
     # helper variable
@@ -231,14 +211,18 @@ def extract_features_VGG16(directory: str):
         # prepare the image for the VGG model
         image = preprocess_input(image)
         # get features
-        feature = model.predict(image, verbose=0)
+        feature = model(image)
+
         # get image id
         image_id = name.split('.')[0]
+
+        feature_path = directory[:-6]+ "features_vgg_classic/" + str(image_id)+ '.npy'
         # store feature
-        features[image_id] = feature
+        features[image_id] = feature_path#feature
+        np.save(feature_path, feature.numpy())
         counter += 1
         print_progress(counter, len(listdir(directory)))
-    print('Transforming images succeed')
+    print('\nTransforming images succeed')
     return features
 
 def batch_generator(batch_size, train_keys, train_images, train_captions, max_tokens):

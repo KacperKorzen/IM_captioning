@@ -1,9 +1,12 @@
 #%%
+from rouge_score import rouge_scorer
+from nltk.translate.bleu_score import sentence_bleu
+from nltk.translate.meteor_score import meteor_score
+from nltk.translate.bleu_score import SmoothingFunction
+
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import numpy as np
-import sys
-import os
 from PIL import Image
 import pickle
 
@@ -22,9 +25,8 @@ from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
 
 from tensorflow.keras.applications import VGG16
 
-from tensorflow.keras.applications.vgg16 import preprocess_input
 from tensorflow.keras.preprocessing.image import load_img 
-
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 
 #%%
 PATH_FLIKER_8K_TOKENS = '/Users/korzeniewski/Desktop/IM_caption/dataset/FLICER8k/annotations/Flickr8k.token.txt'
@@ -35,14 +37,14 @@ PATH_FLIKER_8K_IMAGES = '/Users/korzeniewski/Desktop/IM_caption/dataset/FLICER8k
 PATH_FLIKER_30K_IMAGES = '/Users/korzeniewski/Desktop/IM_caption/dataset/FLICER30k/images'
 PATH_COCO_IMAGES = '/Users/korzeniewski/Desktop/IM_caption/dataset/COCO/images'
 
-COCO = True
+COCO = False
 NUM_WORDS = 10_000
 MARK_START = 'ssss'
 MARK_END = 'eeee'
 SEED = 3
-BATCH_SIZE = 256#128 #256
+BATCH_SIZE = 32#128 #256
 EMBEDDING_SIZE = 128
-EPOCHS = 20
+EPOCHS = 40
 
 #%%
 if COCO:
@@ -71,12 +73,16 @@ for key in captions:
     token_captions = tokenizer.texts_to_sequences(captions[key])
     tokens_captions[key] = token_captions
 
+#########################################
+#########################################
+#########################################
+#########################################
 # %%
 if COCO:
     images_features = utiles.extract_features_VGG16(PATH_COCO_IMAGES+'/train2017')
 else:
     images_features = utiles.extract_features_VGG16(PATH_FLIKER_8K_IMAGES)
-
+    #images_features= utiles.extract_features_xcepction(PATH_FLIKER_8K_IMAGES)
 #%%
 images_names = list(images_features.keys())
 train_keys, test_keys = train_test_split(images_names, random_state= SEED)
@@ -99,25 +105,121 @@ for key, value in train_captions.items():
 print("Longest list:", longest_list)
 print("Longest list length:", CAPTION_LENGTH)
 
+path_to_save = PATH_FLIKER_8K_IMAGES[:-6] + 'vgg_classic_'
+with open(path_to_save + 'train_caption.pkl', 'wb') as fp:
+    pickle.dump(train_captions, fp)
+with open(path_to_save + 'train_images.pkl', 'wb') as fp:
+    pickle.dump(train_images, fp)
+
+with open(path_to_save + 'test_caption.pkl', 'wb') as fp:
+    pickle.dump(test_captions, fp)
+with open(path_to_save + 'test_images.pkl', 'wb') as fp:
+    pickle.dump(test_images, fp)
 # %%
-generator = utiles.batch_generator(BATCH_SIZE, train_keys, train_images, train_captions, CAPTION_LENGTH)
+#generator = utiles.batch_generator(BATCH_SIZE, train_keys, train_images, train_captions, CAPTION_LENGTH)
 #%%
-num_captions_train = 0
+#num_captions_train = 0
 
-for el in train_captions:
-        if isinstance(train_captions[el], list):
-            num_captions_train += len(train_captions[el])
+#for el in train_captions:
+#        if isinstance(train_captions[el], list):
+#            num_captions_train += len(train_captions[el])
 
-STEPS_PER_EPOCH = int(num_captions_train / BATCH_SIZE)
+#STEPS_PER_EPOCH = int(num_captions_train / BATCH_SIZE)
 
-batch = next(generator)
-batch_x = batch[0]
-batch_y = batch[1]
+#batch = next(generator)
+#batch_x = batch[0]
+#batch_y = batch[1]
 
 # %%
-TRANSFER_VALUE_SIZE = train_images[list(train_images.keys())[0]].shape[1]
+#########################################
+#########################################
+#########################################
+#########################################
+
+path_to_save = PATH_FLIKER_8K_IMAGES[:-6] + 'vgg_classic_'#'xception_'
+with open(path_to_save + 'train_caption.pkl', 'rb') as fp:
+    train_captions = pickle.load(fp)
+with open(path_to_save + 'train_images.pkl', 'rb') as fp:
+    train_images = pickle.load(fp)
+with open(path_to_save + 'test_caption.pkl', 'rb') as fp:
+    test_captions = pickle.load(fp)
+with open(path_to_save + 'test_images.pkl', 'rb') as fp:
+    test_images = pickle.load(fp)
+
+shapes = np.load(train_images[list(train_images.keys())[0]]).shape
+TRANSFER_VALUE_SIZE = shapes[1]
 STATE_SIZE = 512
+BUFFER_SIZE = 1000
 VOCAB_SIZE = NUM_WORDS
+
+CAPTION_LENGTH = 0
+for key, value in train_captions.items():
+    for inner_list in value:
+        if len(inner_list) > CAPTION_LENGTH:
+            CAPTION_LENGTH = len(inner_list)
+
+
+# training
+captions_dataset_train = []
+image_dataset_train = []
+
+def map_func(img_name, cap):
+    img_tensor = np.load(img_name)
+    img_tensor = np.reshape(img_tensor, [img_tensor.shape[1]])
+    return img_tensor, cap
+
+train_keys = list(train_images.keys())
+for key in train_keys:
+    for i in range(len(train_captions[key])):
+        image_dataset_train.append(train_images[key])
+        captions_dataset_train.append(train_captions[key][i])
+    #image_dataset_train.append(tf.reshape(train_images[key], [train_images[key].shape[1], train_images[key].shape[2]]))
+    #captions_dataset_train.append(train_captions[key][np.random.randint(0,5)]) #moze nawet 6
+
+tokens_padded = pad_sequences(captions_dataset_train, maxlen=CAPTION_LENGTH, padding='post',truncating='post')
+
+dataset = tf.data.Dataset.from_tensor_slices((image_dataset_train, tokens_padded))
+
+# Use map to load the numpy files in parallel
+dataset = dataset.map(lambda item1, item2: tf.numpy_function(
+          map_func, [item1, item2], [tf.float32, tf.int32]),
+          num_parallel_calls=tf.data.AUTOTUNE)
+
+# Shuffle and batch
+dataset = dataset.shuffle(BUFFER_SIZE).batch(BATCH_SIZE)
+dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
+
+# validation
+captions_dataset_val = []
+image_dataset_val = []
+
+test_keys = list(test_images.keys())
+
+for key in test_keys:
+    for i in range(len(test_captions[key])):
+        image_dataset_val.append(test_images[key])
+        captions_dataset_val.append(test_captions[key][i])
+    #image_dataset_val.append(tf.reshape(test_images[key], [test_images[key].shape[1], test_images[key].shape[2]]))
+    #captions_dataset_val.append(test_captions[key][np.random.randint(0,5)])
+
+tokens_padded_val = pad_sequences(captions_dataset_val, maxlen=CAPTION_LENGTH, padding='post',truncating='post')
+
+dataset_val = tf.data.Dataset.from_tensor_slices((image_dataset_val, tokens_padded_val))
+
+# Use map to load the numpy files in parallel
+dataset_val = dataset_val.map(lambda item1, item2: tf.numpy_function(
+          map_func, [item1, item2], [tf.float32, tf.int64]),
+          num_parallel_calls=tf.data.AUTOTUNE)
+
+# Shuffle and batch
+dataset_val = dataset_val.shuffle(BUFFER_SIZE).batch(BATCH_SIZE)
+dataset_val = dataset_val.prefetch(buffer_size=tf.data.AUTOTUNE)
+
+num_steps_train = len(image_dataset_train) // BATCH_SIZE
+num_steps_val = len(image_dataset_val) // BATCH_SIZE
+
+STEPS_PER_EPOCH = len(image_dataset_train) // BATCH_SIZE
+#%%
 
 '''
 # Image
@@ -171,11 +273,11 @@ decoder_model = Model(inputs=[transfer_values_input, decoder_input],
                       outputs=[decoder_output])
 
 decoder_model.compile(optimizer='adam',
-                      loss='categorical_crossentropy')
-decoder_model.compile(optimizer=RMSprop(lr=1e-3),
                       loss='sparse_categorical_crossentropy')
+#decoder_model.compile(optimizer=RMSprop(lr=1e-3), loss='sparse_categorical_crossentropy')
 #%%
 #save weights etc.
+'''
 path_checkpoint = 'IM_caption_checkpoint_coco.keras'
 callback_checkpoint = ModelCheckpoint(filepath=path_checkpoint,
                                       verbose=1,
@@ -191,8 +293,30 @@ try:
 except Exception as error:
     print("Error trying to load checkpoint.")
     print(error)
+'''
 
-decoder_model.fit(x=generator, steps_per_epoch=STEPS_PER_EPOCH, epochs=EPOCHS, callbacks=callbacks)
+def generator_fn(dataset):
+    for item in dataset:
+        img_tensor, target = item[0], item[1]
+
+        decoder_input_data = target[:, 0:-1]
+        decoder_output_data = target[:, 1:]
+
+        # Dict for the input-data. Because we have several inputs, we use a named dict to
+        # ensure that the data is assigned correctly.
+        x_data = {
+            'decoder_input': np.array(decoder_input_data),
+            'transfer_values_input': np.array(img_tensor)}
+
+        # Dict for the output-data.
+        y_data = {'decoder_output': np.array(decoder_output_data)}
+        yield (x_data, y_data)
+
+start_epoch = 0
+for epoch in range(start_epoch, EPOCHS):
+    generator = generator_fn(dataset)
+
+    decoder_model.fit(x=generator, epochs = 1, steps_per_epoch = STEPS_PER_EPOCH)
 
 #%%
 def generate_caption(image_path, file_name, max_tokens=CAPTION_LENGTH, model_cnn = 'VGG16', caption = 1, caption_path = PATH_FLIKER_8K_TOKENS):
@@ -237,8 +361,6 @@ def generate_caption(image_path, file_name, max_tokens=CAPTION_LENGTH, model_cnn
     # Initialize the number of tokens we have processed.
     count_tokens = 0
 
-    # While we haven't sampled the special end-token for ' eeee'
-    # and we haven't processed the max number of tokens.
     while token_int != tokenizer.word_index[MARK_END.strip()] and count_tokens < max_tokens:
         # Update the input-sequence to the decoder
         # with the last token that was sampled.
@@ -248,20 +370,9 @@ def generate_caption(image_path, file_name, max_tokens=CAPTION_LENGTH, model_cnn
 
         # Wrap the input-data in a dict for clarity and safety,
         # so we are sure we input the data in the right order.
-        x_data = \
-        {
+        x_data = {
             'transfer_values_input': transfer_values,
-            'decoder_input': decoder_input_data
-        }
-
-        # Note that we input the entire sequence of tokens
-        # to the decoder. This wastes a lot of computation
-        # because we are only interested in the last input
-        # and output. We could modify the code to return
-        # the GRU-states when calling predict() and then
-        # feeding these GRU-states as well the next time
-        # we call predict(), but it would make the code
-        # much more complicated.
+            'decoder_input': decoder_input_data}
         
         # Input this data to the decoder and get the predicted output.
         decoder_output = decoder_model.predict(x_data)
@@ -305,43 +416,224 @@ def generate_caption(image_path, file_name, max_tokens=CAPTION_LENGTH, model_cnn
 # %%
 generate_caption(PATH_FLIKER_8K_IMAGES, random.choice(train_keys))
 # %%
-
 generate_caption('/Users/korzeniewski/Desktop/zdjecia/zdjecia_biznesowe',
                   'IMG_8062_tlo',
                   caption=0)
-# %%
-generate_caption(PATH_COCO_IMAGES+'/train2017', random.choice(train_keys), caption=0)
 
-# %%
-
+# %% metrics evaluattion
+bleu_1_train = []; bleu_2_train = []; bleu_3_train = []; bleu_4_train = []
+meteor_train = []
+rouge_1_train = []; rouge_2_train = []; rouge_L_train = []
+cider_train = []
 scorer_rouge = rouge_scorer.RougeScorer(['rouge1','rouge2', 'rougeL'], use_stemmer=True)
+chencherry = SmoothingFunction()
 
-candidate_row = 'little girl is doing back bend in filed'
-reference_row = 'little girl doing back bend'
+image_dataset_train_numpy = np.array(image_dataset_train)
+captions_dataset_train_numpy = np.array(captions_dataset_train)
+images = set(image_dataset_train)
 
-candidate = candidate_row.split()
-reference = reference_row.split()
+counter = 0
+for element in images:
+    utiles.print_progress(counter, len(images))
 
-# Calculate BLEU-1 score
-bleu_1 = sentence_bleu([reference], candidate, weights=(1, 0, 0, 0))
-# Calculate BLEU-2 score
-bleu_2 = sentence_bleu([reference], candidate, weights=(0.5, 0.5, 0, 0))
-# Calculate BLEU-3 score
-bleu_3 = sentence_bleu([reference], candidate, weights=(1/3, 1/3, 1/3, 0))
-# Calculate BLEU-4 score
-bleu_4 = sentence_bleu([reference], candidate, weights=(0.25, 0.25, 0.25, 0.25))
-# calculate Meteor
-meteor = meteor_score([reference], candidate)
-# rouge score
-rouge_scores = scorer_rouge.score(reference_row, candidate_row)
-rouge_1 = rouge_scores['rouge1'].fmeasure
-rouge_2 = rouge_scores['rouge2'].fmeasure
-rouge_L = rouge_scores['rougeL'].fmeasure
-print("BLEU-1:", bleu_1)
-print("BLEU-2:", bleu_2)
-print("BLEU-3:", bleu_3)
-print("BLEU-4:", bleu_4)
-print("METEOR:", meteor)
-print("ROUGE-1:", rouge_1)
-print("ROUGE-2:", rouge_2)
-print("ROUGE-L:", rouge_L)
+    index = np.where(image_dataset_train_numpy == element)
+    # data
+    image_val = np.load(element)
+    reference_captions = captions_dataset_train_numpy[index]
+    caption_val_raw = []
+    caption_val_split = []
+    for el in reference_captions: 
+        cap = tokenizer.tokens_to_string(el[1:-1])
+        caption_val_raw.append(cap)
+        caption_val_split.append(cap.split())
+    
+    # make prediction
+    shape = (1, CAPTION_LENGTH)
+    decoder_input_data = np.zeros(shape=shape, dtype=np.int64)
+
+    # The first input-token is the special start-token for 'ssss '.
+    token_int = tokenizer.word_index[MARK_START.strip()]
+
+    # Initialize an empty output-text.
+    output_text = ''
+
+    # Initialize the number of tokens we have processed.
+    count_tokens = 0
+
+    while token_int != tokenizer.word_index[MARK_END.strip()] and count_tokens < CAPTION_LENGTH:
+        # Update the input-sequence to the decoder
+        # with the last token that was sampled.
+        # In the first iteration this will set the
+        # first element to the start-token.
+        decoder_input_data[0, count_tokens] = token_int
+
+        # Wrap the input-data in a dict for clarity and safety,
+        # so we are sure we input the data in the right order.
+        x_data = {
+            'transfer_values_input': image_val,
+            'decoder_input': decoder_input_data}
+        
+        # Input this data to the decoder and get the predicted output.
+        decoder_output = decoder_model.predict(x_data, verbose=0)
+
+        # Get the last predicted token as a one-hot encoded array.
+        # Note that this is not limited by softmax, but we just
+        # need the index of the largest element so it doesn't matter.
+        token_onehot = decoder_output[0, count_tokens, :]
+
+        # Convert to an integer-token.
+        token_int = np.argmax(token_onehot)
+
+        # Lookup the word corresponding to this integer-token.
+        sampled_word = tokenizer.token_to_word(token_int)
+
+        # Append the word to the output-text.
+        if sampled_word != token_end:
+            output_text += " " + sampled_word
+
+        # Increment the token-counter.
+        count_tokens += 1
+
+    prediction_caption = output_text.split()
+    # calculate matrics
+    # Calculate BLEU-1 score
+    bleu_1_train.append(sentence_bleu(caption_val_split, prediction_caption, weights=(1, 0, 0, 0), smoothing_function=chencherry.method1))
+    # Calculate BLEU-2 score
+    bleu_2_train.append(sentence_bleu(caption_val_split, prediction_caption, weights=(0.5, 0.5, 0, 0), smoothing_function=chencherry.method1))
+    # Calculate BLEU-3 score
+    bleu_3_train.append(sentence_bleu(caption_val_split, prediction_caption, weights=(1/3, 1/3, 1/3, 0), smoothing_function=chencherry.method1))
+    # Calculate BLEU-4 score
+    bleu_4_train.append(sentence_bleu(caption_val_split, prediction_caption, weights=(0.25, 0.25, 0.25, 0.25), smoothing_function=chencherry.method1))
+    # calculate Meteor
+    meteor_train.append(meteor_score(caption_val_split, prediction_caption))
+    # rouge score
+    for el in caption_val_raw:
+        rouge_scores = scorer_rouge.score(el, ' '.join(prediction_caption))
+        rouge_1_train.append(rouge_scores['rouge1'].fmeasure)
+        rouge_2_train.append(rouge_scores['rouge2'].fmeasure)
+        rouge_L_train.append(rouge_scores['rougeL'].fmeasure)
+
+    counter += 1
+
+print()
+print("#"*20)
+print("\tMetrics train set")
+print("BLEU-1: ", np.round(np.mean(bleu_1_train),2), '+-', np.round(np.std(bleu_1_train),2))
+print("BLEU-2: ", np.round(np.mean(bleu_2_train),2), '+-', np.round(np.std(bleu_2_train),2))
+print("BLEU-3: ", np.round(np.mean(bleu_3_train),2), '+-', np.round(np.std(bleu_3_train),2))
+print("BLEU-4: ", np.round(np.mean(bleu_4_train),2), '+-', np.round(np.std(bleu_4_train),2))
+print("METEOR: ", np.round(np.mean(meteor_train),2), '+-', np.round(np.std(meteor_train),2))
+print("ROUGE-1: ", np.round(np.mean(rouge_1_train),2), '+-', np.round(np.std(rouge_1_train),2))
+print("ROUGE-2: ", np.round(np.mean(rouge_2_train),2), '+-', np.round(np.std(rouge_2_train),2))
+print("ROUGE-L: ", np.round(np.mean(rouge_L_train),2), '+-', np.round(np.std(rouge_L_train),2))
+
+#%%
+# metrics calculation for validation set
+cider_val = []
+bleu_1_val = []; bleu_2_val = []; bleu_3_val = []; bleu_4_val = []
+meteor_val = []
+rouge_1_val = []; rouge_2_val = []; rouge_L_val = []
+scorer_rouge = rouge_scorer.RougeScorer(['rouge1','rouge2', 'rougeL'], use_stemmer=True)
+chencherry = SmoothingFunction()
+
+image_dataset_val_numpy = np.array(image_dataset_val)
+captions_dataset_val_numpy = np.array(captions_dataset_val)
+images = set(image_dataset_val)
+
+counter = 0
+for element in images:
+    utiles.print_progress(counter, len(images))
+
+    index = np.where(image_dataset_val_numpy == element)
+    # data
+    image_val = np.load(element)
+    reference_captions = captions_dataset_val_numpy[index]
+    caption_val_raw = []
+    caption_val_split = []
+    for el in reference_captions: 
+        cap = tokenizer.tokens_to_string(el[1:-1])
+        caption_val_raw.append(cap)
+        caption_val_split.append(cap.split())
+    
+    # make prediction
+    shape = (1, CAPTION_LENGTH)
+    decoder_input_data = np.zeros(shape=shape, dtype=np.int64)
+
+    # The first input-token is the special start-token for 'ssss '.
+    token_int = tokenizer.word_index[MARK_START.strip()]
+
+    # Initialize an empty output-text.
+    output_text = ''
+
+    # Initialize the number of tokens we have processed.
+    count_tokens = 0
+
+    while token_int != tokenizer.word_index[MARK_END.strip()] and count_tokens < CAPTION_LENGTH:
+        # Update the input-sequence to the decoder
+        # with the last token that was sampled.
+        # In the first iteration this will set the
+        # first element to the start-token.
+        decoder_input_data[0, count_tokens] = token_int
+
+        # Wrap the input-data in a dict for clarity and safety,
+        # so we are sure we input the data in the right order.
+        x_data = {
+            'transfer_values_input': image_val,
+            'decoder_input': decoder_input_data}
+        
+        # Input this data to the decoder and get the predicted output.
+        decoder_output = decoder_model.predict(x_data, verbose=0)
+
+        # Get the last predicted token as a one-hot encoded array.
+        # Note that this is not limited by softmax, but we just
+        # need the index of the largest element so it doesn't matter.
+        token_onehot = decoder_output[0, count_tokens, :]
+
+        # Convert to an integer-token.
+        token_int = np.argmax(token_onehot)
+
+        # Lookup the word corresponding to this integer-token.
+        sampled_word = tokenizer.token_to_word(token_int)
+
+        # Append the word to the output-text.
+        if sampled_word != token_end:
+            output_text += " " + sampled_word
+
+        # Increment the token-counter.
+        count_tokens += 1
+
+    prediction_caption = output_text.split()
+
+    # calculate matrics
+    # Calculate BLEU-1 score
+    bleu_1_val.append(sentence_bleu(caption_val_split, prediction_caption, weights=(1, 0, 0, 0), smoothing_function=chencherry.method1))
+    # Calculate BLEU-2 score
+    bleu_2_val.append(sentence_bleu(caption_val_split, prediction_caption, weights=(0.5, 0.5, 0, 0), smoothing_function=chencherry.method1))
+    # Calculate BLEU-3 score
+    bleu_3_val.append(sentence_bleu(caption_val_split, prediction_caption, weights=(1/3, 1/3, 1/3, 0), smoothing_function=chencherry.method1))
+    # Calculate BLEU-4 score
+    bleu_4_val.append(sentence_bleu(caption_val_split, prediction_caption, weights=(0.25, 0.25, 0.25, 0.25), smoothing_function=chencherry.method1))
+    # calculate Meteor
+    meteor_val.append(meteor_score(caption_val_split, prediction_caption))
+    # rouge score
+    for el in caption_val_raw:
+        rouge_scores = scorer_rouge.score(el, ' '.join(prediction_caption))
+        rouge_1_val.append(rouge_scores['rouge1'].fmeasure)
+        rouge_2_val.append(rouge_scores['rouge2'].fmeasure)
+        rouge_L_val.append(rouge_scores['rougeL'].fmeasure)
+
+    counter +=1
+
+print()
+print("#"*20)
+print("\tMetrics val set")
+print("BLEU-1: ", np.round(np.mean(bleu_1_val),2), '+-', np.round(np.std(bleu_1_val),2))
+print("BLEU-2: ", np.round(np.mean(bleu_2_val),2), '+-', np.round(np.std(bleu_2_val),2))
+print("BLEU-3: ", np.round(np.mean(bleu_3_val),2), '+-', np.round(np.std(bleu_3_val),2))
+print("BLEU-4: ", np.round(np.mean(bleu_4_val),2), '+-', np.round(np.std(bleu_4_val),2))
+print("METEOR: ", np.round(np.mean(meteor_val),2), '+-', np.round(np.std(meteor_val),2))
+print("ROUGE-1: ", np.round(np.mean(rouge_1_val),2), '+-', np.round(np.std(rouge_1_val),2))
+print("ROUGE-2: ", np.round(np.mean(rouge_2_val),2), '+-', np.round(np.std(rouge_2_val),2))
+print("ROUGE-L: ", np.round(np.mean(rouge_L_val),2), '+-', np.round(np.std(rouge_L_val),2))
+
+# %%
