@@ -83,7 +83,7 @@ def extract_features_VGG16(directory: str):
         # get image id
         image_id = name.split('.')[0]
 
-        feature_path = directory[:-6]+ "features_vgg_va/" + str(image_id)+ '.npy'
+        feature_path = '/home2/Kacper_captioning/'+ "f8_features_vgg_va/" + str(image_id) + '.npy'
         # store feature
         features[image_id] = feature_path#feature
         np.save(feature_path, feature.numpy())
@@ -140,7 +140,7 @@ def extract_features_xcepction(directory: str):
 
         # get image id
         image_id = name.split('.')[0]
-        feature_path = directory[:-6]+ "features_xception_va/" + str(image_id)+ '.npy'
+        feature_path = '/home2/Kacper_captioning/'+ "f30_features_xception_va/" + str(image_id)+ '.npy'
         # store feature
         features[image_id] = feature_path#feature
         np.save(feature_path, feature.numpy())

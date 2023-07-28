@@ -9,7 +9,7 @@ import json
 
 from tensorflow.keras.models import Model
 from tensorflow.keras.utils import img_to_array
-from tensorflow.keras.applications import VGG16
+from tensorflow.keras.applications import VGG16, xception
 
 from tensorflow.keras.applications.vgg16 import preprocess_input
 from tensorflow.keras.preprocessing.image import load_img 
@@ -216,7 +216,7 @@ def extract_features_VGG16(directory: str):
         # get image id
         image_id = name.split('.')[0]
 
-        feature_path = directory[:-6]+ "features_vgg_classic/" + str(image_id)+ '.npy'
+        feature_path = '/home2/Kacper_captioning/'+ "f8_features_vgg_classic/" + str(image_id)+ '.npy'
         # store feature
         features[image_id] = feature_path#feature
         np.save(feature_path, feature.numpy())
@@ -339,3 +339,54 @@ def load_records_coco(data_dir, train=True):
 
     return mapping
 
+def extract_features_Xception(directory: str):
+    """extract_features_VGG16 is used to load end extract features of photos from dataset
+
+    Args:
+        directory (str): directory to path of images
+
+    Returns:
+        dictionary: output of image features
+    """
+    # load model VGG16
+    model = xception.Xception(include_top = True)
+    
+    # pop last fully connect layer
+    model = Model(inputs = model.input,
+                outputs = model.layers[-2].output)
+
+    print(model.summary())
+    print('\n')
+    # helper variable
+    features = {}
+    # extract features from each photo
+    counter = 0
+    file_list = listdir(directory)
+    file_list.sort()
+    if file_list[0] == '.DS_Store':
+        file_list.pop(0)
+
+    for name in file_list:
+        #loading image
+        file_path = directory + '/' + name
+        image = load_img(file_path, target_size = (model.input.shape[1],model.input.shape[2]))
+        # convert the image pixels to a numpy array
+        image = img_to_array(image, dtype = 'float16')
+        # reshape data for the model
+        image = image.reshape((1, image.shape[0], image.shape[1], image.shape[2]))
+        # prepare the image for the xception model
+        image = xception.preprocess_input(image)
+        # get features
+        feature = model(image)
+
+        # get image id
+        image_id = name.split('.')[0]
+
+        feature_path = '/home2/Kacper_captioning/'+ "f30_features_xception_classic/" + str(image_id)+ '.npy'
+        # store feature
+        features[image_id] = feature_path#feature
+        np.save(feature_path, feature.numpy())
+        counter += 1
+        print_progress(counter, len(listdir(directory)))
+    print('\nTransforming images succeed')
+    return features
